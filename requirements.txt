@@ -7,7 +7,7 @@ httplib2==0.22.0
 httptools==0.6.0
 httpx==0.23.3
 Jinja2==3.1.2
-mysql-connector-python==8.2.0
+mysql-connector-python==8.1.0
 mysqlclient==2.2.0
 nest-asyncio==1.5.7
 nltk==3.8.1
