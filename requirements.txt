@@ -8,7 +8,7 @@ httptools==0.6.0
 httpx==0.23.3
 Jinja2==3.1.2
 mysql-connector-python==8.0.31
-mysqlclient==2.2.0
+mysqlclient==2.1.1
 nest-asyncio==1.5.7
 nltk==3.8.1
 openai==0.27.10
