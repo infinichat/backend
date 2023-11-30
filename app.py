@@ -11,8 +11,7 @@ import mysql.connector
 import http.cookiejar
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
-
+CORS(app)
 
 load_dotenv()
 
@@ -225,6 +224,8 @@ def cache_response_in_database(question, answer):
             cursor.close()
             connection.close()
 
+
+#assign cookies to the browser
 current_session_id = None
 
 session = requests.Session()
@@ -257,44 +258,54 @@ def start_conversation_crisp():
     if response.status_code == 201:
         data = response.json()
         current_session_id = data['data']['session_id']
+        print(current_session_id)
         return current_session_id
     else:
         print(f"Request failed with status code {response.status_code}.")
         print(response.text)
 
-# execute flow
+
+# Function to execute the flow
+# Function to execute the flow
 def execute_flow(payload):
-        try:
-            question = payload.get("question")
-            send_user_message_crisp(question)
-            if not question:
-                raise ValueError("Invalid payload: 'question' is required.")
+    try:
+        question = payload.get("question")
+        send_user_message_crisp(question)
+        if not question:
+            raise ValueError("Invalid payload: 'question' is required.")
 
-            # Check the MySQL database first
-            cached_response = query_with_caching(question)
+        # Check the MySQL database first
+        cached_response = query_with_caching(question)
 
-            if cached_response:
-                # If the question is in the database, return the cached response
-                send_agent_message_crisp(cached_response)
-                return jsonify({"response": cached_response})
-            else:
-                # If the question is not in the database, continue with OpenAI flow
-                thread_openai_id = start_thread_openai()
-                send_message_user(thread_openai_id, json_payload={"question": question})
-                ai_response = retrieve_ai_response(thread_openai_id)
-                send_agent_message_crisp(ai_response)
+        if cached_response:
+            # If the question is in the database, return the cached response
+            send_agent_message_crisp(cached_response)
+            # modify_agent_message_crisp(cached_response)
+            last_message_response = check_the_last_message()
+            return jsonify({"response": last_message_response})
+        else:
+            # If the question is not in the database, continue with OpenAI flow
+            thread_openai_id = start_thread_openai()
+            send_message_user(thread_openai_id, json_payload={"question": question})
+            ai_response = retrieve_ai_response(thread_openai_id)
 
-                # Cache the response in the MySQL database for future use
-                # Assuming there's a table named 'qa_table' with columns 'question' and 'answer'
-                if ai_response:
-                    cache_response_in_database(question, ai_response)
+            # Modify the agent message and capture the modified response
+            # modify_agent_message_crisp(ai_response)
 
-                return jsonify({"response": ai_response})
-        except Exception as e:
-            return jsonify({"response": "Something went wrong"})
+            # Check if the last message has changed
+            last_message_response = check_the_last_message()
+
+            # Cache the response in the MySQL database for future use
+            # Assuming there's a table named 'qa_table' with columns 'question' and 'answer'
+            if ai_response:
+                cache_response_in_database(question, ai_response)
+
+            return jsonify({"response": last_message_response})
+    except Exception as e:
+        return jsonify({"response": "Something went wrong"})
+
 
 #start conversation in crisp and return session_id
-
 def send_user_message_crisp(question):
     session_id = start_conversation_crisp()
     website_id = os.getenv("website_id")
@@ -326,23 +337,32 @@ def send_user_message_crisp(question):
         print(f"Request failed with status code {response.status_code}.")
         print(response.text)
 
+
+#send message from agent
+# Variable to store the fingerprint
+global_fingerprint = None
+
+# Function to send agent message and return the fingerprint
 def send_agent_message_crisp(response):
+    global global_fingerprint
     session_id = start_conversation_crisp()
     website_id = os.getenv("website_id")
     api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{session_id}/message"
     username = os.getenv("crisp_identifier")
     password = os.getenv("crisp_key")
-    basic_auth_credentials=(username, password)
+    alert = "http://127.0.0.1:5000/edit"
+    basic_auth_credentials = (username, password)
     headers = {
         'Content-Type': 'application/json',
         'User-Agent': 'PostmanRuntime/7.35.0',
         'X-Crisp-Tier': 'plugin'
     }
+
     payload = {
         "type": "text",
         "from": "operator",
         "origin": "chat",
-        "content": response
+        "content": response + f" [Edit]({alert})"
     }
     response = requests.post(
         api_url,
@@ -352,11 +372,104 @@ def send_agent_message_crisp(response):
     )
 
     if response.status_code == 202:
-        print(response.json())
+        data = response.json()
+        global_fingerprint = data['data']['fingerprint']
+        print(global_fingerprint)
+        return global_fingerprint
     else:
         print(f"Request failed with status code {response.status_code}.")
         print(response.text)
 
+# Function to modify agent message using the provided fingerprint
+# def modify_agent_message_crisp(modified_response):
+#     global global_fingerprint
+#     if global_fingerprint is None:
+#         print("Fingerprint not available. Send a message first.")
+#         return None
+
+#     session_id = start_conversation_crisp()
+#     website_id = os.getenv("website_id")
+#     username = os.getenv("crisp_identifier")
+#     password = os.getenv("crisp_key")
+#     api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{session_id}/message/{global_fingerprint}"
+#     basic_auth_credentials = (username, password)
+#     headers = {
+#         'Content-Type': 'application/json',
+#         'User-Agent': 'PostmanRuntime/7.35.0',
+#         'X-Crisp-Tier': 'plugin'
+#     }
+#     payload = {
+#         "content": modified_response
+#     }
+#     response = requests.patch(
+#         api_url,
+#         headers=headers,
+#         auth=HTTPBasicAuth(*basic_auth_credentials),
+#         json=payload
+#     )
+#     if response.status_code == 202:
+#         return modified_response
+#     else:
+#         print(f"Request failed with status code {response.status_code}.")
+#         print(response.text)
+
+# Function to check the last message
+def check_the_last_message():
+    # global global_fingerprint
+    # if global_fingerprint is None:
+    #     print("Fingerprint not available. Send a message first.")
+    #     return None
+
+    session_id = start_conversation_crisp()
+    website_id = os.getenv("website_id")
+    username = os.getenv("crisp_identifier")
+    password = os.getenv("crisp_key")
+    api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{session_id}/messages?timestamp_before="
+    basic_auth_credentials = (username, password)
+    headers = {
+        'Content-Type': 'application/json',
+        'User-Agent': 'PostmanRuntime/7.35.0',
+        'X-Crisp-Tier': 'plugin'
+    }
+
+    response = requests.get(
+        api_url,
+        headers=headers,
+        auth=HTTPBasicAuth(*basic_auth_credentials),
+    )
+
+    if response.status_code == 200:
+        data = response.json()
+        messages = data['data']
+
+        returned_response = [msg['content'] for msg in messages if msg['from'] == 'operator']
+
+        if returned_response:
+            return returned_response
+        else:
+            print("No messages from the operator.")
+            return None
+    else: 
+        print(f"Request failed with status code {response.status_code}.")
+        print(response.text)
+# Function to modify agent message using the provided fingerprint
+#track the modification flag
+
+# Function to handle the editing of messages
+# @app.route('/edit', methods=['GET', 'POST'])
+# def edit_message():
+#     if request.method == 'POST':
+#         data = request.get_json()
+#         user_message = data.get('message', '')
+        
+#         # Modify the agent message using the stored fingerprint
+#         modify_agent_message_crisp(user_message)
+    
+#     return render_template('alert.html')
+
+# return only the modified response in the chat, using GET
+
+#HOME route
 #HOME route
 @app.route('/', methods=['GET', 'POST'])
 def handle_api_requests():
@@ -373,8 +486,8 @@ def handle_api_requests():
     # Handle GET requests (if required)
     elif request.method == 'GET':
         # Perform actions for GET requests (if needed)
-        return jsonify({"message": "This is a GET request"}), 200
+        last_message_response = check_the_last_message()
+        return jsonify({"response": last_message_response}), 200
 
 if __name__ == "__main__":
     app.run(debug=True)
-
