@@ -1,9 +1,7 @@
 import os
-import threading
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
 import time
-from threading import Thread
 import psycopg2
 import requests
 from dotenv import load_dotenv
@@ -57,79 +55,6 @@ def start_conversation_crisp():
     else:
         print(f"Request failed with status code {response.status_code}.")
         print(response.text)
-
-
-# Variable to control the background thread
-# should_run = True
-# previous_responses = []
-        
-# def check_the_last_message():
-#     global should_run
-#     global previous_responses
-#     session_id = start_conversation_crisp()
-#     website_id = os.getenv("website_id")
-#     username = os.getenv("crisp_identifier")
-#     password = os.getenv("crisp_key")
-#     api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{session_id}/messages"
-#     basic_auth_credentials = (username, password)
-#     headers = {
-#         'Content-Type': 'application/json',
-#         'User-Agent': 'PostmanRuntime/7.35.0',
-#         'X-Crisp-Tier': 'plugin'
-#     }
-
-#     while should_run:
-#         try:
-#             response = requests.get(
-#                 api_url,
-#                 headers=headers,
-#                 auth=HTTPBasicAuth(*basic_auth_credentials),
-#             )
-
-#             if response.status_code == 200:
-#                 data = response.json()
-#                 messages = data.get('data', [])
-#                 if messages:
-#                     new_response = [msg['content'] for msg in messages if msg['from'] == 'operator']
-
-#                     # Check if the list is not empty before accessing its last element
-#                     if new_response and new_response[-1] not in previous_responses:
-#                         print("Latest message from operator:", new_response[-1])
-
-#                         # Update the set of previous responses
-#                         previous_responses.append(new_response[-1])
-
-#                         print("Response from previous_response" + str(previous_responses))
-
-#                         socketio.emit('start', {'response': new_response[-1]}, namespace='/')
-
-#                         check_response = new_response
-#                             # Check if the lists are equal
-#                         if previous_responses == check_response:
-#                                 print("Lists are equal")
-#                         else:
-#                                 print("Lists are not equal!")
-
-#                                 # Filter the previous_responses list
-#                                 filtered_list = [msg for msg in previous_responses if msg in check_response]
-
-#                                 print(filtered_list)
-
-#                                 deleted_msg = [msg for msg in previous_responses if msg not in filtered_list]
-
-#                                 # Emit messages for deletion
-#                                 print(deleted_msg)
-#                                 socketio.emit('delete_message', {'response': deleted_msg[0]})
-#         except IndexError as e:
-#             print(f"IndexError: {e}")
-#             # Continue to the next iteration of the loop
-#             continue
-#         except Exception as e:
-#             print(f"Error: {e}")
-
-#         # time.sleep(5)
-
-#     return None
 
 
 # #start conversation in crisp and return session_id
@@ -214,7 +139,11 @@ def index():
 def handle_connect():
     print('Client connected')
 
+
+thread_openai_id = None
+
 def start_thread_openai():
+    global thread_openai_id
     token = os.getenv("api_key")
     api_url = "https://api.openai.com/v1/threads"
     response = requests.post(
@@ -419,32 +348,189 @@ def cache_response_in_database(question, answer):
             cursor.close()
             connection.close()
 
+first_question = 'What is your name?'
+second_question = 'What is your phone number?'
+
+# Modify patch_profile to accept nickname and phone_number as arguments
+def patch_profile(nickname, phone_number):
+    global current_session_id
+    website_id = os.getenv("website_id")
+    username = os.getenv("crisp_identifier")
+    password = os.getenv("crisp_key")
+    basic_auth_credentials = (username, password)
+    api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{current_session_id}/meta"
+    headers = {
+        'Content-Type': 'application/json',
+        'User-Agent': 'PostmanRuntime/7.35.0',
+        'X-Crisp-Tier': 'plugin'
+    }
+
+    payload = {
+        "nickname": nickname,
+        "data": {
+            "phone": phone_number
+        }
+    }
+
+    try:
+        response = requests.patch(
+            api_url,
+            headers=headers,
+            auth=HTTPBasicAuth(*basic_auth_credentials),
+            json=payload
+        )
+
+        response.raise_for_status()  # Raise an HTTPError for bad responses (4xx and 5xx)
+        print(response.json())
+   
+    except requests.exceptions.HTTPError as errh:
+        print(f"HTTP Error: {errh}")
+    except requests.exceptions.ConnectionError as errc:
+        print(f"Error Connecting: {errc}")
+    except requests.exceptions.Timeout as errt:
+        print(f"Timeout Error: {errt}")
+    except requests.exceptions.RequestException as err:
+        print(f"Request Error: {err}")
+
+
+def check_conversation():
+    website_id = os.getenv("website_id")
+    username = os.getenv("crisp_identifier")
+    password = os.getenv("crisp_key")
+    basic_auth_credentials = (username, password)
+    api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{current_session_id}/messages"
+    headers = {
+        'Content-Type': 'application/json',
+        'User-Agent': 'PostmanRuntime/7.35.0',
+        'X-Crisp-Tier': 'plugin'
+    }
+    try:
+        response = requests.get(
+            api_url,
+            headers=headers,
+            auth=HTTPBasicAuth(*basic_auth_credentials),
+        )
+
+        response.raise_for_status()  # Raise an HTTPError for bad responses (4xx and 5xx)
+        data = response.json()
+
+        user_content_after_name = None
+        user_content_after_number = None
+        found_name_question = False
+        found_number_question = False
+
+        for item in data.get("data", []):
+            print("Item:", item)
+
+            if item.get("from") == "operator" and "What is your name?" in item.get("content", ""):
+                found_name_question = True
+            elif found_name_question and item.get("from") == "user":
+                user_content_after_name = item["content"]
+                print("User's message after 'What is your name?':", user_content_after_name)
+                break
+
+            if item.get("from") == "operator" and "What is your phone number?" in item.get("content", ""):
+                found_number_question = True
+            elif found_number_question and item.get("from") == "user":
+                user_content_after_number = item["content"]
+                print("User's message after 'What is your phone number?':", user_content_after_number)
+                break
+        
+        print("Patching profile: " + str(user_content_after_name) + ", " + str(user_content_after_number))
+        return user_content_after_name, user_content_after_number
+
+    except requests.exceptions.HTTPError as errh:
+        print(f"HTTP Error: {errh}")
+    except requests.exceptions.ConnectionError as errc:
+        print(f"Error Connecting: {errc}")
+    except requests.exceptions.Timeout as errt:
+        print(f"Timeout Error: {errt}")
+    except requests.exceptions.RequestException as err:
+        print(f"Request Error: {err}")
+
+first_messages = [] 
+
+conversation_checked = 0
+question_answered = False
 
 def execute_flow(message):
-        question = message
-        send_user_message_crisp(question)
+    global thread_openai_id
+    global current_session_id
+    global question_answered
+    global conversation_checked
+    global first_messages
 
-        if not question:
-            raise ValueError("Invalid payload: 'question' is required.")
+    question = message
 
-#         # Check the MySQL database first
+    if not question:
+        raise ValueError("Invalid payload: 'question' is required.")
+
+    send_user_message_crisp(question)
+
+    if not question_answered and conversation_checked == 0:
+        print('Appending the first question')
+        first_messages.append(question)
+        cached_response = query_with_caching(first_messages[0])
+        print("Executing check_conversation() for the first time")
+        send_agent_message_crisp("What is your name?")
+        check_conversation()
+        conversation_checked += 1
+    elif not question_answered and conversation_checked == 1:
+        print("Executing check_conversation() for the second time")
+        send_agent_message_crisp("What is your phone number?")
+        check_conversation()
+        cached_response = query_with_caching(first_messages[0])
+        if cached_response:
+                # If the question is in the database, return the cached response
+                # Assuming you have defined send_agent_message_crisp somewhere in your code
+            send_agent_message_crisp(cached_response)
+
+        elif thread_openai_id is None:
+            thread_openai_id = start_thread_openai()
+
+                # Assuming you have defined send_message_user somewhere in your code
+            send_message_user(thread_openai_id, first_messages[0])
+
+                # Retrieve AI response
+                # Assuming you have defined retrieve_ai_response somewhere in your code
+            ai_response = retrieve_ai_response(thread_openai_id)
+
+                # Cache the response in the MySQL database for future use
+                # Assuming you have defined cache_response_in_database somewhere in your code
+            if ai_response:
+                send_agent_message_crisp(ai_response)
+                cache_response_in_database(first_messages[0], ai_response)
+
+        conversation_checked += 1
+    else:
+        print("Skipped check_conversation()")
+
+        # Assuming you have defined query_with_caching somewhere in your code
         cached_response = query_with_caching(question)
 
         if cached_response:
-#             # If the question is in the database, return the cached response
+                # If the question is in the database, return the cached response
+                # Assuming you have defined send_agent_message_crisp somewhere in your code
             send_agent_message_crisp(cached_response)
-        else:
+
+        elif thread_openai_id is None:
             thread_openai_id = start_thread_openai()
+
+                # Assuming you have defined send_message_user somewhere in your code
             send_message_user(thread_openai_id, question)
 
-#             # Retrieve AI response
+                # Retrieve AI response
+                # Assuming you have defined retrieve_ai_response somewhere in your code
             ai_response = retrieve_ai_response(thread_openai_id)
 
-#             # Cache the response in the MySQL database for future use
-#             # Assuming there's a table named 'qa_table' with columns 'question' and 'answer'
+                # Cache the response in the MySQL database for future use
+                # Assuming you have defined cache_response_in_database somewhere in your code
             if ai_response:
                 send_agent_message_crisp(ai_response)
+                cache_response_in_database(question, ai_response)
 
+
+            # Check if the current question is a profile-related question
 #     except Exception as e:
 #         print(f"Error: {str(e)}")
 #         return jsonify({"response": "Something went wrong"})
@@ -462,17 +548,14 @@ def send_message(message, fingerprint):
     print(f"Message received: {message}" + f"Fingerprint received: {fingerprint}")
     socketio.emit('start', {'response': message})
     message_data[fingerprint] = message
-
-
+    
+    
 @socketio.on('message_to_delete')
 def delete_message(fingerprint):
     # Check if the fingerprint exists in the message_data dictionary
     if fingerprint in message_data:
         # If it exists, retrieve the corresponding message
         del_message = message_data[fingerprint]
-        
-        # Optionally, you can remove the entry from the dictionary if you want
-        # del message_data[fingerprint]
 
         print(f"Message to delete: {del_message}")
         
@@ -499,21 +582,11 @@ def edit_message(new_message, fingerprint):
         print(f"No message found for fingerprint: {fingerprint}")
 
 
-
 @socketio.on('message_from_client')
 def handle_message(message):
-
     print('Received message:', message)
-    # data = message.get("quest", "")
-    # type = message.get("type", "userMessage")
-
-    # if type == "userMessage":
-    #     last_user_message = data
 
     execute_flow(message)
-
-    # You can process the message here and send a response back to the client if needed
-    # emit('start', {'response': response})
 
 if __name__ == '__main__':
     socketio.run(app, debug=True)
