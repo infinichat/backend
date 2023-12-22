@@ -633,9 +633,7 @@ def handle_message(message):
 
     execute_flow(message)
 
-@app.route('/', methods=['GET', 'POST'])
-def hello_world():
-    return 'Hello from Flask!' 
+
 
 if __name__ == '__main__':
     socketio.run(app, debug=True)
