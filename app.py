@@ -135,9 +135,10 @@ def send_agent_message_crisp(response):
 def index():
     return render_template("index.html")
 
-@socketio.on('connect')
-def handle_connect():
-    print('Client connected')
+# @socketio.on('connect')
+# def handle_connect():
+#     print('Client connected')
+#     socketio.emit('start', {'response': 'Hello!'})
 
 
 thread_openai_id = None
@@ -299,6 +300,34 @@ def retrieve_ai_response(thread_openai_id):
         return None
 
 
+# def query_with_caching(question):
+#     connection = None
+#     try:
+#         connection = psycopg2.connect(**db_config)
+#         cursor = connection.cursor()
+
+#         # Remove punctuation and perform case-insensitive matching using regular expression
+#         cleaned_question = re.sub(r'[^\w\s]', '', question)
+#         query = "SELECT answer FROM chat_cache WHERE question ~* %s"
+#         cursor.execute(query, (cleaned_question,))
+#         result = cursor.fetchone()
+
+#         print("querying db")
+
+#         if result:
+#             return result[0]
+#         else:
+#             return None
+
+#     except psycopg2.Error as e:
+#         print(f"Error querying PostgreSQL database: {e}")
+#         return None
+
+#     finally:
+#         if connection and connection.closed == 0:
+#             cursor.close()
+#             connection.close()
+
 def query_with_caching(question):
     connection = None
     try:
@@ -307,8 +336,10 @@ def query_with_caching(question):
 
         # Remove punctuation and perform case-insensitive matching using regular expression
         cleaned_question = re.sub(r'[^\w\s]', '', question)
+
+        # Update the regex pattern to include Ukrainian letters and use the re.UNICODE flag
         query = "SELECT answer FROM chat_cache WHERE question ~* %s"
-        cursor.execute(query, (cleaned_question,))
+        cursor.execute(query, (cleaned_question,), flags=re.UNICODE)
         result = cursor.fetchone()
 
         print("querying db")
@@ -326,6 +357,7 @@ def query_with_caching(question):
         if connection and connection.closed == 0:
             cursor.close()
             connection.close()
+
 
 def cache_response_in_database(question, answer):
     connection = None
@@ -422,14 +454,16 @@ def check_conversation():
         for item in data.get("data", []):
             print("Item:", item)
 
-            if item.get("from") == "operator" and "What is your name?" in item.get("content", ""):
+            if item.get("from") == "operator" and "Як до вас звертатись?" in item.get("content", ""):
                 found_name_question = True
             elif found_name_question and item.get("from") == "user":
                 user_content_after_name = item["content"]
                 print("User's message after 'What is your name?':", user_content_after_name)
                 break
-
-            if item.get("from") == "operator" and "What is your phone number?" in item.get("content", ""):
+        
+        for item in data.get("data", [1]):
+            print("Item:", item)
+            if item.get("from") == "operator" and "Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами." in item.get("content", ""):
                 found_number_question = True
             elif found_number_question and item.get("from") == "user":
                 user_content_after_number = item["content"]
@@ -437,7 +471,7 @@ def check_conversation():
                 break
         
         print("Patching profile: " + str(user_content_after_name) + ", " + str(user_content_after_number))
-        return user_content_after_name, user_content_after_number
+        patch_profile(user_content_after_name, user_content_after_number)
 
     except requests.exceptions.HTTPError as errh:
         print(f"HTTP Error: {errh}")
@@ -453,6 +487,11 @@ first_messages = []
 conversation_checked = 0
 question_answered = False
 
+def send_await_message():
+    socketio.emit('start', {'response': 'Ваш запит в обробці. Це може зайняти до 1 хвилини!'})
+    time.sleep(5)
+    socketio.emit('start', {'response': 'Підбираю для Вас найкращу відповідь...'})
+
 def execute_flow(message):
     global thread_openai_id
     global current_session_id
@@ -466,74 +505,79 @@ def execute_flow(message):
         raise ValueError("Invalid payload: 'question' is required.")
 
     send_user_message_crisp(question)
+    try: 
+        if not question_answered and conversation_checked == 0:
+            print('Appending the first question')
+            first_messages.append(question)
+            cached_response = query_with_caching(first_messages[0])
+            print("Executing check_conversation() for the first time")
+            send_agent_message_crisp("Як до Вас звертатись?")
+            # check_conversation()
+            conversation_checked += 1
+        elif not question_answered and conversation_checked == 1:
+            print("Executing check_conversation() for the second time")
+            send_agent_message_crisp("Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами.")
+            # check_conversation()
+            conversation_checked += 1
 
-    if not question_answered and conversation_checked == 0:
-        print('Appending the first question')
-        first_messages.append(question)
-        cached_response = query_with_caching(first_messages[0])
-        print("Executing check_conversation() for the first time")
-        send_agent_message_crisp("What is your name?")
-        check_conversation()
-        conversation_checked += 1
-    elif not question_answered and conversation_checked == 1:
-        print("Executing check_conversation() for the second time")
-        send_agent_message_crisp("What is your phone number?")
-        check_conversation()
-        cached_response = query_with_caching(first_messages[0])
-        if cached_response:
-                # If the question is in the database, return the cached response
-                # Assuming you have defined send_agent_message_crisp somewhere in your code
-            send_agent_message_crisp(cached_response)
+        elif not question_answered and conversation_checked == 2:
+            cached_response = query_with_caching(first_messages[0])
+            check_conversation()
+            if cached_response:
+                    # If the question is in the database, return the cached response
+                    # Assuming you have defined send_agent_message_crisp somewhere in your code
+                send_agent_message_crisp(cached_response)
 
-        elif thread_openai_id is None:
-            thread_openai_id = start_thread_openai()
+            elif thread_openai_id is None:
+                thread_openai_id = start_thread_openai()
 
-                # Assuming you have defined send_message_user somewhere in your code
-            send_message_user(thread_openai_id, first_messages[0])
+                    # Assuming you have defined send_message_user somewhere in your code
+                send_message_user(thread_openai_id, first_messages[0])
 
-                # Retrieve AI response
-                # Assuming you have defined retrieve_ai_response somewhere in your code
-            ai_response = retrieve_ai_response(thread_openai_id)
+                    # Retrieve AI response
+                    # Assuming you have defined retrieve_ai_response somewhere in your code
 
-                # Cache the response in the MySQL database for future use
-                # Assuming you have defined cache_response_in_database somewhere in your code
-            if ai_response:
-                send_agent_message_crisp(ai_response)
-                cache_response_in_database(first_messages[0], ai_response)
+                ai_response = retrieve_ai_response(thread_openai_id)
 
-        conversation_checked += 1
-    else:
-        print("Skipped check_conversation()")
+                    # Cache the response in the MySQL database for future use
+                    # Assuming you have defined cache_response_in_database somewhere in your code
+                if ai_response:
+                    send_agent_message_crisp(ai_response)
+                    cache_response_in_database(first_messages[0], ai_response)
 
-        # Assuming you have defined query_with_caching somewhere in your code
-        cached_response = query_with_caching(question)
+            conversation_checked += 1
+        else:
+            print("Skipped check_conversation()")
 
-        if cached_response:
-                # If the question is in the database, return the cached response
-                # Assuming you have defined send_agent_message_crisp somewhere in your code
-            send_agent_message_crisp(cached_response)
+            # Assuming you have defined query_with_caching somewhere in your code
+            cached_response = query_with_caching(question)
 
-        elif thread_openai_id is None:
-            thread_openai_id = start_thread_openai()
+            if cached_response:
+                    # If the question is in the database, return the cached response
+                    # Assuming you have defined send_agent_message_crisp somewhere in your code
+                send_agent_message_crisp(cached_response)
 
-                # Assuming you have defined send_message_user somewhere in your code
-            send_message_user(thread_openai_id, question)
+            elif thread_openai_id is None:
+                thread_openai_id = start_thread_openai()
 
-                # Retrieve AI response
-                # Assuming you have defined retrieve_ai_response somewhere in your code
-            ai_response = retrieve_ai_response(thread_openai_id)
+                    # Assuming you have defined send_message_user somewhere in your code
+                send_message_user(thread_openai_id, question)
 
-                # Cache the response in the MySQL database for future use
-                # Assuming you have defined cache_response_in_database somewhere in your code
-            if ai_response:
-                send_agent_message_crisp(ai_response)
-                cache_response_in_database(question, ai_response)
+                    # Retrieve AI response
+                    # Assuming you have defined retrieve_ai_response somewhere in your code
+                ai_response = retrieve_ai_response(thread_openai_id)
+
+                    # Cache the response in the MySQL database for future use
+                    # Assuming you have defined cache_response_in_database somewhere in your code
+                if ai_response:
+                    send_agent_message_crisp(ai_response)
+                    cache_response_in_database(question, ai_response)
 
 
             # Check if the current question is a profile-related question
-#     except Exception as e:
-#         print(f"Error: {str(e)}")
-#         return jsonify({"response": "Something went wrong"})
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        socketio.emit('start', {'response': 'Щось пішло не так! Спробуйте пізніще...'})
 
 # Start a background thread to send messages continuously
 # message_thread = threading.Thread(target=check_the_last_message)
