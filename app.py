@@ -7,10 +7,8 @@ import requests
 # from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 import re
-from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
 socketio = SocketIO(app, cors_allowed_origins='*')
 
 
@@ -144,7 +142,7 @@ def index():
 
 
 thread_openai_id = None
-token = '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'
+token = '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'
 
 def start_thread_openai():
     global thread_openai_id
@@ -301,34 +299,6 @@ def retrieve_ai_response(thread_openai_id):
         return None
 
 
-# def query_with_caching(question):
-#     connection = None
-#     try:
-#         connection = psycopg2.connect(**db_config)
-#         cursor = connection.cursor()
-
-#         # Remove punctuation and perform case-insensitive matching using regular expression
-#         cleaned_question = re.sub(r'[^\w\s]', '', question)
-#         query = "SELECT answer FROM chat_cache WHERE question ~* %s"
-#         cursor.execute(query, (cleaned_question,))
-#         result = cursor.fetchone()
-
-#         print("querying db")
-
-#         if result:
-#             return result[0]
-#         else:
-#             return None
-
-#     except psycopg2.Error as e:
-#         print(f"Error querying PostgreSQL database: {e}")
-#         return None
-
-#     finally:
-#         if connection and connection.closed == 0:
-#             cursor.close()
-#             connection.close()
-
 def query_with_caching(question):
     connection = None
     try:
@@ -337,10 +307,8 @@ def query_with_caching(question):
 
         # Remove punctuation and perform case-insensitive matching using regular expression
         cleaned_question = re.sub(r'[^\w\s]', '', question)
-
-        # Update the regex pattern to include Ukrainian letters and use the re.UNICODE flag
         query = "SELECT answer FROM chat_cache WHERE question ~* %s"
-        cursor.execute(query, (cleaned_question,), flags=re.UNICODE)
+        cursor.execute(query, (cleaned_question,))
         result = cursor.fetchone()
 
         print("querying db")
@@ -358,6 +326,36 @@ def query_with_caching(question):
         if connection and connection.closed == 0:
             cursor.close()
             connection.close()
+
+# def query_with_caching(question):
+#     connection = None
+#     try:
+#         connection = psycopg2.connect(**db_config)
+#         cursor = connection.cursor()
+
+#         # Remove punctuation and perform case-insensitive matching using regular expression
+#         cleaned_question = re.sub(r'[^\w\s]', '', question)
+
+#         # Update the regex pattern to include Ukrainian letters and use the re.UNICODE flag
+#         query = "SELECT answer FROM chat_cache WHERE question ~* %s"
+#         cursor.execute(query, (cleaned_question,), flags=re.UNICODE)
+#         result = cursor.fetchone()
+
+#         print("querying db")
+
+#         if result:
+#             return result[0]
+#         else:
+#             return None
+
+#     except psycopg2.Error as e:
+#         print(f"Error querying PostgreSQL database: {e}")
+#         return None
+
+#     finally:
+#         if connection and connection.closed == 0:
+#             cursor.close()
+#             connection.close()
 
 
 def cache_response_in_database(question, answer):
