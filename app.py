@@ -4,7 +4,7 @@ from flask_socketio import SocketIO, emit
 import time
 import psycopg2
 import requests
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 import re
 from flask_cors import CORS
@@ -14,16 +14,20 @@ CORS(app)
 socketio = SocketIO(app, cors_allowed_origins='*')
 
 
-load_dotenv()
+# load_dotenv()
 
 db_config = {
-    'host': os.getenv('PGHOST'),
-    'database': os.getenv('PGDATABASE'),
-    'user': os.getenv('PGUSER'),
-    'password': os.getenv('PGPASSWORD'),
+    'host': 'ep-square-band-21310990.us-east-2.aws.neon.tech',
+    'database': 'openai_test',
+    'user': 'helloakaa1',
+    'password': 'S4XKzLq5gAPr',
 }
 
 current_session_id = None
+
+website_id = '84ca425b-3cf3-4a00-836c-1212d36eba0c'
+username = '5609c6ae-2281-45fe-b66f-01f3976a8fec'
+password = '3da36469d1da798b3b4ce23eae580637b0a308ea654c71d78cff08937604f191'
 
 def start_conversation_crisp():
     global current_session_id
@@ -31,9 +35,6 @@ def start_conversation_crisp():
     if current_session_id:
         return current_session_id
 
-    website_id = os.getenv("website_id")
-    username = os.getenv("crisp_identifier")
-    password = os.getenv("crisp_key")
     basic_auth_credentials = (username, password)
     api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation"
     headers = {
@@ -61,10 +62,10 @@ def start_conversation_crisp():
 # #start conversation in crisp and return session_id
 def send_user_message_crisp(question):
     session_id = start_conversation_crisp()
-    website_id = os.getenv("website_id")
+    # website_id = os.getenv("website_id")
     api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{session_id}/message"
-    username = os.getenv("crisp_identifier")
-    password = os.getenv("crisp_key")
+    # username = os.getenv("crisp_identifier")
+    # password = os.getenv("crisp_key")
     basic_auth_credentials=(username, password)
     headers = {
         'Content-Type': 'application/json',
@@ -97,10 +98,10 @@ global_fingerprint = None
 def send_agent_message_crisp(response):
     global global_fingerprint
     session_id = start_conversation_crisp()
-    website_id = os.getenv("website_id")
+    # website_id = os.getenv("website_id")
     api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{session_id}/message"
-    username = os.getenv("crisp_identifier")
-    password = os.getenv("crisp_key")
+    # username = os.getenv("crisp_identifier")
+    # password = os.getenv("crisp_key")
     alert = "http://127.0.0.1:5000/edit"
     basic_auth_credentials = (username, password)
     headers = {
@@ -143,10 +144,10 @@ def index():
 
 
 thread_openai_id = None
+token = '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'
 
 def start_thread_openai():
     global thread_openai_id
-    token = os.getenv("api_key")
     api_url = "https://api.openai.com/v1/threads"
     response = requests.post(
         api_url,
@@ -171,7 +172,7 @@ def start_thread_openai():
 
 #Sending a message to a thread. Step 1
 def send_message_user(thread_openai_id, question):
-    token = os.getenv("api_key")
+    # token = os.getenv("api_key")
 
     try:
         if thread_openai_id and question:
@@ -211,7 +212,7 @@ def send_message_user(thread_openai_id, question):
     
 # Create a run Step2
 def check_run_status(thread_openai_id, run_id):
-    token = os.getenv("api_key")
+    # token = os.getenv("api_key")
     api_url = f"https://api.openai.com/v1/threads/{thread_openai_id}/runs/{run_id}"
     headers = {
         "Authorization": f"Bearer {token}",
@@ -235,9 +236,9 @@ def check_run_status(thread_openai_id, run_id):
         else:
             print(f"Error checking run status: {response.status_code}, {response.text}")
             break  # Exit the loop if there's an error
-
+assistant_id = 'asst_oki9yFnL5vI7zbUuTsybsj2w'
 def create_run(thread_openai_id):
-    token = os.getenv("api_key")
+    # token = os.getenv("api_key")
     api_url = f"https://api.openai.com/v1/threads/{thread_openai_id}/runs"
     headers = {
         "Content-Type": "application/json",
@@ -245,7 +246,6 @@ def create_run(thread_openai_id):
         "OpenAI-Beta": "assistants=v1",
         "User-Agent": "PostmanRuntime/7.34.0"
     }
-    assistant_id = os.getenv("assistant_id")
     json_payload = {
         "assistant_id": assistant_id
     }
@@ -261,7 +261,7 @@ def create_run(thread_openai_id):
     
 
 def retrieve_ai_response(thread_openai_id):
-    token = os.getenv("api_key")
+    # token = os.getenv("api_key")
     api_url = f"https://api.openai.com/v1/threads/{thread_openai_id}/messages"
 
     try:
@@ -387,9 +387,9 @@ second_question = 'What is your phone number?'
 # Modify patch_profile to accept nickname and phone_number as arguments
 def patch_profile(nickname, phone_number):
     global current_session_id
-    website_id = os.getenv("website_id")
-    username = os.getenv("crisp_identifier")
-    password = os.getenv("crisp_key")
+    # website_id = os.getenv("website_id")
+    # username = os.getenv("crisp_identifier")
+    # password = os.getenv("crisp_key")
     basic_auth_credentials = (username, password)
     api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{current_session_id}/meta"
     headers = {
@@ -427,9 +427,9 @@ def patch_profile(nickname, phone_number):
 
 
 def check_conversation():
-    website_id = os.getenv("website_id")
-    username = os.getenv("crisp_identifier")
-    password = os.getenv("crisp_key")
+    # website_id = os.getenv("website_id")
+    # username = os.getenv("crisp_identifier")
+    # password = os.getenv("crisp_key")
     basic_auth_credentials = (username, password)
     api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{current_session_id}/messages"
     headers = {
