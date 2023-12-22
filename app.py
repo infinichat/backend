@@ -7,9 +7,10 @@ import requests
 from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 import re
-
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 socketio = SocketIO(app, cors_allowed_origins='*')
 
 
