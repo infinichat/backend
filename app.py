@@ -7,10 +7,11 @@ import requests
 # from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 import re
+from flask_cors import CORS 
 
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins='*')
-
 
 # load_dotenv()
 
@@ -450,9 +451,8 @@ def check_conversation():
         found_name_question = False
         found_number_question = False
 
-        for item in data.get("data", []):
+        for item in data.get("data", [0]):
             print("Item:", item)
-
             if item.get("from") == "operator" and "Як до вас звертатись?" in item.get("content", ""):
                 found_name_question = True
             elif found_name_question and item.get("from") == "user":
@@ -468,10 +468,10 @@ def check_conversation():
                 user_content_after_number = item["content"]
                 print("User's message after 'What is your phone number?':", user_content_after_number)
                 break
-        
+
         print("Patching profile: " + str(user_content_after_name) + ", " + str(user_content_after_number))
         patch_profile(user_content_after_name, user_content_after_number)
-
+            
     except requests.exceptions.HTTPError as errh:
         print(f"HTTP Error: {errh}")
     except requests.exceptions.ConnectionError as errc:
@@ -510,11 +510,15 @@ def execute_flow(message):
             first_messages.append(question)
             cached_response = query_with_caching(first_messages[0])
             print("Executing check_conversation() for the first time")
-            send_agent_message_crisp("Як до Вас звертатись?")
+            send_agent_message_crisp('Як до вас звертатись?')
+            # send_await_message('Як до вас звертатись?')
+            socketio.emit('start', {'response': 'Як до вас звертатись?'})
             # check_conversation()
             conversation_checked += 1
         elif not question_answered and conversation_checked == 1:
             print("Executing check_conversation() for the second time")
+
+            socketio.emit('start', {'response': "Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами."})
             send_agent_message_crisp("Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами.")
             # check_conversation()
             conversation_checked += 1
@@ -525,7 +529,9 @@ def execute_flow(message):
             if cached_response:
                     # If the question is in the database, return the cached response
                     # Assuming you have defined send_agent_message_crisp somewhere in your code
+                socketio.emit('start', {'response': cached_response})
                 send_agent_message_crisp(cached_response)
+               
 
             elif thread_openai_id is None:
                 thread_openai_id = start_thread_openai()
@@ -541,12 +547,14 @@ def execute_flow(message):
                     # Cache the response in the MySQL database for future use
                     # Assuming you have defined cache_response_in_database somewhere in your code
                 if ai_response:
+                    send_await_message()
                     send_agent_message_crisp(ai_response)
                     cache_response_in_database(first_messages[0], ai_response)
 
             conversation_checked += 1
         else:
             print("Skipped check_conversation()")
+            send_await_message()
 
             # Assuming you have defined query_with_caching somewhere in your code
             cached_response = query_with_caching(question)
@@ -554,7 +562,9 @@ def execute_flow(message):
             if cached_response:
                     # If the question is in the database, return the cached response
                     # Assuming you have defined send_agent_message_crisp somewhere in your code
+                socketio.emit('start', {'response': cached_response})
                 send_agent_message_crisp(cached_response)
+               
 
             elif thread_openai_id is None:
                 thread_openai_id = start_thread_openai()
@@ -569,8 +579,10 @@ def execute_flow(message):
                     # Cache the response in the MySQL database for future use
                     # Assuming you have defined cache_response_in_database somewhere in your code
                 if ai_response:
+                    socketio.emit('start', {'response': ai_response})
                     send_agent_message_crisp(ai_response)
                     cache_response_in_database(question, ai_response)
+            
 
 
             # Check if the current question is a profile-related question
@@ -584,45 +596,45 @@ def execute_flow(message):
 # # Start the thread
 # message_thread.start()
 
-message_data = {}
+# message_data = {}
 
-@socketio.on('send_message')
-def send_message(message, fingerprint):
-    print(f"Message received: {message}" + f"Fingerprint received: {fingerprint}")
-    socketio.emit('start', {'response': message})
-    message_data[fingerprint] = message
+# @socketio.on('send_message')
+# def send_message(message, fingerprint):
+#     print(f"Message received: {message}" + f"Fingerprint received: {fingerprint}")
+#     socketio.emit('start', {'response': message})
+#     message_data[fingerprint] = message
     
     
-@socketio.on('message_to_delete')
-def delete_message(fingerprint):
-    # Check if the fingerprint exists in the message_data dictionary
-    if fingerprint in message_data:
-        # If it exists, retrieve the corresponding message
-        del_message = message_data[fingerprint]
+# @socketio.on('message_to_delete')
+# def delete_message(fingerprint):
+#     # Check if the fingerprint exists in the message_data dictionary
+#     if fingerprint in message_data:
+#         # If it exists, retrieve the corresponding message
+#         del_message = message_data[fingerprint]
 
-        print(f"Message to delete: {del_message}")
+#         print(f"Message to delete: {del_message}")
         
-        # Emit an event to notify the client or perform any other actions
-        socketio.emit('delete_message', {'response': del_message})
-    else:
-        print(f"No message found for fingerprint: {fingerprint}")
+#         # Emit an event to notify the client or perform any other actions
+#         socketio.emit('delete_message', {'response': del_message})
+#     else:
+#         print(f"No message found for fingerprint: {fingerprint}")
 
-@socketio.on('edit_message')
-def edit_message(new_message, fingerprint):
-    if fingerprint in message_data:
-        # Retrieve the existing message
-        old_message = message_data[fingerprint]
-        socketio.emit('delete_message', {'response': old_message})
+# @socketio.on('edit_message')
+# def edit_message(new_message, fingerprint):
+#     if fingerprint in message_data:
+#         # Retrieve the existing message
+#         old_message = message_data[fingerprint]
+#         socketio.emit('delete_message', {'response': old_message})
 
-        # Update the message in the dictionary
-        message_data[fingerprint] = new_message
+#         # Update the message in the dictionary
+#         message_data[fingerprint] = new_message
 
-        print(f"Message edited. Old message: {old_message}, New message: {new_message}")
+#         print(f"Message edited. Old message: {old_message}, New message: {new_message}")
 
-        # Emit an event to notify the client or perform any other actions
-        socketio.emit('start', {'response': new_message})
-    else:
-        print(f"No message found for fingerprint: {fingerprint}")
+#         # Emit an event to notify the client or perform any other actions
+#         socketio.emit('start', {'response': new_message})
+#     else:
+#         print(f"No message found for fingerprint: {fingerprint}")
 
 
 @socketio.on('message_from_client')
