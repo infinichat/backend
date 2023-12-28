@@ -1,10 +1,11 @@
 import os
-from flask import Flask, render_template
-from flask_socketio import SocketIO, emit
+import uuid
+from flask import Flask, render_template, request
+from flask_socketio import SocketIO, emit, join_room, leave_room
 import time
 import psycopg2
 import requests
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 import re
 from flask_cors import CORS 
@@ -13,7 +14,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins='*')
 
-# load_dotenv()
+load_dotenv()
 
 db_config = {
     'host': 'ep-square-band-21310990.us-east-2.aws.neon.tech',
@@ -22,17 +23,59 @@ db_config = {
     'password': 'S4XKzLq5gAPr',
 }
 
-current_session_id = None
 
 website_id = '84ca425b-3cf3-4a00-836c-1212d36eba0c'
 username = '5609c6ae-2281-45fe-b66f-01f3976a8fec'
 password = '3da36469d1da798b3b4ce23eae580637b0a308ea654c71d78cff08937604f191'
 
-def start_conversation_crisp():
-    global current_session_id
 
-    if current_session_id:
-        return current_session_id
+first_messages = []
+user_session_mapping = {}
+
+@socketio.on('connect')
+def handle_connect():
+    global question_answered
+    global conversation_checked
+    global first_messages
+
+    user_id = str(uuid.uuid4())  # Generate a unique user ID
+    join_room(user_id)
+    print(f'User {user_id} connected')
+    emit('user_id', {'response': user_id}) 
+    print(f'Sent {user_id}')
+    session_id = start_conversation_crisp()
+    user_session_mapping[user_id] = session_id
+    print(session_id)
+
+    # Reset state for the new user
+    question_answered = False
+    conversation_checked = 0
+    first_messages = []
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected')  
+
+@socketio.on('message_from_client')
+def handle_send_message(data):
+    print(data)
+    user_id = data.get('user_id')
+    message = data.get('message')
+    print(user_id)
+    print(message)
+    session_id = user_session_mapping.get(user_id)
+
+    if session_id:
+        execute_flow(message, user_id, session_id)
+    
+    # execute_flow(message, user_id)
+
+
+def start_conversation_crisp():
+    # global current_session_id
+
+    # if current_session_id:
+    #     return current_session_id
 
     basic_auth_credentials = (username, password)
     api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation"
@@ -59,8 +102,8 @@ def start_conversation_crisp():
 
 
 # #start conversation in crisp and return session_id
-def send_user_message_crisp(question):
-    session_id = start_conversation_crisp()
+def send_user_message_crisp(question, session_id):
+    # session_id = start_conversation_crisp()
     # website_id = os.getenv("website_id")
     api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{session_id}/message"
     # username = os.getenv("crisp_identifier")
@@ -94,9 +137,9 @@ def send_user_message_crisp(question):
 global_fingerprint = None
 
 # Function to send agent message and return the fingerprint
-def send_agent_message_crisp(response):
+def send_agent_message_crisp(response, session_id):
     global global_fingerprint
-    session_id = start_conversation_crisp()
+    # session_id = start_conversation_crisp()
     # website_id = os.getenv("website_id")
     api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{session_id}/message"
     # username = os.getenv("crisp_identifier")
@@ -136,14 +179,14 @@ def send_agent_message_crisp(response):
 def index():
     return render_template("index.html")
 
-# @socketio.on('connect')
-# def handle_connect():
-#     print('Client connected')
-#     socketio.emit('start', {'response': 'Hello!'})
+# ?
+    
 
+# socketio.on_namespace(ChatNamespace('/chat/1'))
+# socketio.on_namespace(ChatNamespace('/chat/2'))
 
 thread_openai_id = None
-token = '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'
+token = os.getenv('token')
 
 def start_thread_openai():
     global thread_openai_id
@@ -172,7 +215,6 @@ def start_thread_openai():
 #Sending a message to a thread. Step 1
 def send_message_user(thread_openai_id, question):
     # token = os.getenv("api_key")
-
     try:
         if thread_openai_id and question:
             api_url = f"https://api.openai.com/v1/threads/{thread_openai_id}/messages"
@@ -236,6 +278,7 @@ def check_run_status(thread_openai_id, run_id):
             print(f"Error checking run status: {response.status_code}, {response.text}")
             break  # Exit the loop if there's an error
 assistant_id = 'asst_oki9yFnL5vI7zbUuTsybsj2w'
+
 def create_run(thread_openai_id):
     # token = os.getenv("api_key")
     api_url = f"https://api.openai.com/v1/threads/{thread_openai_id}/runs"
@@ -384,13 +427,12 @@ first_question = 'What is your name?'
 second_question = 'What is your phone number?'
 
 # Modify patch_profile to accept nickname and phone_number as arguments
-def patch_profile(nickname, phone_number):
-    global current_session_id
+def patch_profile(nickname, phone_number, session_id):
     # website_id = os.getenv("website_id")
     # username = os.getenv("crisp_identifier")
     # password = os.getenv("crisp_key")
     basic_auth_credentials = (username, password)
-    api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{current_session_id}/meta"
+    api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{session_id}/meta"
     headers = {
         'Content-Type': 'application/json',
         'User-Agent': 'PostmanRuntime/7.35.0',
@@ -425,12 +467,12 @@ def patch_profile(nickname, phone_number):
         print(f"Request Error: {err}")
 
 
-def check_conversation():
+def check_conversation(session_id):
     # website_id = os.getenv("website_id")
     # username = os.getenv("crisp_identifier")
     # password = os.getenv("crisp_key")
     basic_auth_credentials = (username, password)
-    api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{current_session_id}/messages"
+    api_url = f"https://api.crisp.chat/v1/website/{website_id}/conversation/{session_id}/messages"
     headers = {
         'Content-Type': 'application/json',
         'User-Agent': 'PostmanRuntime/7.35.0',
@@ -470,7 +512,7 @@ def check_conversation():
                 break
 
         print("Patching profile: " + str(user_content_after_name) + ", " + str(user_content_after_number))
-        patch_profile(user_content_after_name, user_content_after_number)
+        patch_profile(user_content_after_name, user_content_after_number, session_id)
             
     except requests.exceptions.HTTPError as errh:
         print(f"HTTP Error: {errh}")
@@ -487,11 +529,11 @@ conversation_checked = 0
 question_answered = False
 
 def send_await_message():
-    socketio.emit('start', {'response': 'Ваш запит в обробці. Це може зайняти до 1 хвилини!'})
+    socketio.emit('start', {'response': 'Ваш запит в обробці. Це може зайняти до 1 хвилини!'}, namespace='/chat')
     time.sleep(5)
-    socketio.emit('start', {'response': 'Підбираю для Вас найкращу відповідь...'})
+    socketio.emit('start', {'response': 'Підбираю для Вас найкращу відповідь...'}, namespace='/chat')
 
-def execute_flow(message):
+def execute_flow(message, user_id, session_id):
     global thread_openai_id
     global current_session_id
     global question_answered
@@ -503,34 +545,34 @@ def execute_flow(message):
     if not question:
         raise ValueError("Invalid payload: 'question' is required.")
 
-    send_user_message_crisp(question)
+    send_user_message_crisp(question, session_id)
     try: 
         if not question_answered and conversation_checked == 0:
             print('Appending the first question')
             first_messages.append(question)
             cached_response = query_with_caching(first_messages[0])
             print("Executing check_conversation() for the first time")
-            send_agent_message_crisp('Як до вас звертатись?')
+            send_agent_message_crisp('Як до вас звертатись?', session_id)
             # send_await_message('Як до вас звертатись?')
-            socketio.emit('start', {'response': 'Як до вас звертатись?'})
+            emit('start', {'user_id': user_id, 'message': 'Як до вас звертатись?'}, room=user_id)
             # check_conversation()
             conversation_checked += 1
         elif not question_answered and conversation_checked == 1:
             print("Executing check_conversation() for the second time")
 
-            socketio.emit('start', {'response': "Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами."})
-            send_agent_message_crisp("Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами.")
+            emit('start', {'user_id': user_id, 'message': "Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами."}, room=user_id)
+            send_agent_message_crisp("Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами.", session_id)
             # check_conversation()
             conversation_checked += 1
 
         elif not question_answered and conversation_checked == 2:
             cached_response = query_with_caching(first_messages[0])
-            check_conversation()
+            check_conversation(session_id)
             if cached_response:
                     # If the question is in the database, return the cached response
                     # Assuming you have defined send_agent_message_crisp somewhere in your code
-                socketio.emit('start', {'response': cached_response})
-                send_agent_message_crisp(cached_response)
+                emit('start', {'user_id': user_id, 'message': cached_response}, room=user_id)
+                send_agent_message_crisp(cached_response, session_id)
                
 
             elif thread_openai_id is None:
@@ -548,7 +590,8 @@ def execute_flow(message):
                     # Assuming you have defined cache_response_in_database somewhere in your code
                 if ai_response:
                     send_await_message()
-                    send_agent_message_crisp(ai_response)
+                    send_agent_message_crisp(ai_response, session_id)
+                    emit('start', {'user_id': user_id, 'message': ai_response}, room=user_id)
                     cache_response_in_database(first_messages[0], ai_response)
 
             conversation_checked += 1
@@ -562,8 +605,8 @@ def execute_flow(message):
             if cached_response:
                     # If the question is in the database, return the cached response
                     # Assuming you have defined send_agent_message_crisp somewhere in your code
-                socketio.emit('start', {'response': cached_response})
-                send_agent_message_crisp(cached_response)
+                emit('start', {'user_id': user_id, 'message': cached_response}, room=user_id)
+                send_agent_message_crisp(cached_response, session_id)
                
 
             elif thread_openai_id is None:
@@ -579,8 +622,8 @@ def execute_flow(message):
                     # Cache the response in the MySQL database for future use
                     # Assuming you have defined cache_response_in_database somewhere in your code
                 if ai_response:
-                    socketio.emit('start', {'response': ai_response})
-                    send_agent_message_crisp(ai_response)
+                    emit('start', {'user_id': user_id, 'message': ai_response}, room=user_id)
+                    send_agent_message_crisp(ai_response, session_id)
                     cache_response_in_database(question, ai_response)
             
 
@@ -588,66 +631,4 @@ def execute_flow(message):
             # Check if the current question is a profile-related question
     except Exception as e:
         print(f"Error: {str(e)}")
-        socketio.emit('start', {'response': 'Щось пішло не так! Спробуйте пізніще...'})
-
-# Start a background thread to send messages continuously
-# message_thread = threading.Thread(target=check_the_last_message)
-
-# # Start the thread
-# message_thread.start()
-
-# message_data = {}
-
-# @socketio.on('send_message')
-# def send_message(message, fingerprint):
-#     print(f"Message received: {message}" + f"Fingerprint received: {fingerprint}")
-#     socketio.emit('start', {'response': message})
-#     message_data[fingerprint] = message
-    
-    
-# @socketio.on('message_to_delete')
-# def delete_message(fingerprint):
-#     # Check if the fingerprint exists in the message_data dictionary
-#     if fingerprint in message_data:
-#         # If it exists, retrieve the corresponding message
-#         del_message = message_data[fingerprint]
-
-#         print(f"Message to delete: {del_message}")
-        
-#         # Emit an event to notify the client or perform any other actions
-#         socketio.emit('delete_message', {'response': del_message})
-#     else:
-#         print(f"No message found for fingerprint: {fingerprint}")
-
-# @socketio.on('edit_message')
-# def edit_message(new_message, fingerprint):
-#     if fingerprint in message_data:
-#         # Retrieve the existing message
-#         old_message = message_data[fingerprint]
-#         socketio.emit('delete_message', {'response': old_message})
-
-#         # Update the message in the dictionary
-#         message_data[fingerprint] = new_message
-
-#         print(f"Message edited. Old message: {old_message}, New message: {new_message}")
-
-#         # Emit an event to notify the client or perform any other actions
-#         socketio.emit('start', {'response': new_message})
-#     else:
-#         print(f"No message found for fingerprint: {fingerprint}")
-
-
-@socketio.on('message_from_client')
-def handle_message(message):
-    print('Received message:', message)
-
-    execute_flow(message)
-
-
-
-if __name__ == '__main__':
-    socketio.run(app, debug=True)
-
-
-
-
+        emit('start', {'user_id': user_id, 'message': 'Щось пішло не так, спробуйте пізніше...'}, room=user_id)
