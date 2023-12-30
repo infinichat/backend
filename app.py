@@ -8,7 +8,9 @@ import requests
 from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
 import re
-from flask_cors import CORS 
+from flask_cors import CORS
+import psycopg2
+from psycopg2 import OperationalError
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -31,7 +33,33 @@ password = '3da36469d1da798b3b4ce23eae580637b0a308ea654c71d78cff08937604f191'
 
 first_messages = []
 user_session_mapping = {}
+user_thread_mapping = {}
 
+
+def start_thread_openai():
+    global thread_openai_id
+    api_url = "https://api.openai.com/v1/threads"
+    response = requests.post(
+        api_url,
+        headers={
+            "OpenAI-Beta": "assistants=v1",
+            "User-Agent": "PostmanRuntime/7.34.0",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}"
+        },
+        json={},
+    )
+
+    if response.status_code == 200:
+        data = response.json()
+        thread_openai_id = data.get("id")
+        print("Thread started successfully! Thread id:", thread_openai_id)
+
+        return thread_openai_id
+    else:
+        print("Error starting OpenAI thread:", response.status_code, response.text)
+        return None
+    
 @socketio.on('connect')
 def handle_connect():
     global question_answered
@@ -46,6 +74,9 @@ def handle_connect():
     session_id = start_conversation_crisp()
     user_session_mapping[user_id] = session_id
     print(session_id)
+    thread_openai_id = start_thread_openai()
+    user_thread_mapping[user_id] = thread_openai_id
+    print(thread_openai_id)
 
     # Reset state for the new user
     question_answered = False
@@ -185,32 +216,12 @@ def index():
 # socketio.on_namespace(ChatNamespace('/chat/1'))
 # socketio.on_namespace(ChatNamespace('/chat/2'))
 
-thread_openai_id = None
+# thread_openai_id = None
 token = os.getenv('token')
 
-def start_thread_openai():
-    global thread_openai_id
-    api_url = "https://api.openai.com/v1/threads"
-    response = requests.post(
-        api_url,
-        headers={
-            "OpenAI-Beta": "assistants=v1",
-            "User-Agent": "PostmanRuntime/7.34.0",
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}"
-        },
-        json={},
-    )
 
-    if response.status_code == 200:
-        data = response.json()
-        thread_openai_id = data.get("id")
-        print("Thread started successfully! Thread id:", thread_openai_id)
+# thread_openai_id = None
 
-        return thread_openai_id
-    else:
-        print("Error starting OpenAI thread:", response.status_code, response.text)
-        return None
 
 #Sending a message to a thread. Step 1
 def send_message_user(thread_openai_id, question):
@@ -277,7 +288,8 @@ def check_run_status(thread_openai_id, run_id):
         else:
             print(f"Error checking run status: {response.status_code}, {response.text}")
             break  # Exit the loop if there's an error
-assistant_id = 'asst_oki9yFnL5vI7zbUuTsybsj2w'
+
+assistant_id = 'asst_etblvZdwgK4B5GQruyxyPpVJ'
 
 def create_run(thread_openai_id):
     # token = os.getenv("api_key")
@@ -341,8 +353,7 @@ def retrieve_ai_response(thread_openai_id):
     except requests.exceptions.RequestException as e:
         print(f"API Request Error: {e}")
         return None
-
-
+    
 def query_with_caching(question):
     connection = None
     try:
@@ -362,14 +373,20 @@ def query_with_caching(question):
         else:
             return None
 
-    except psycopg2.Error as e:
-        print(f"Error querying PostgreSQL database: {e}")
-        return None
+    except psycopg2.OperationalError as e:
+        print(f"Error connecting to the database: {e}")
 
     finally:
-        if connection and connection.closed == 0:
-            cursor.close()
-            connection.close()
+        try:
+            if connection:
+                connection.close()
+        except psycopg2.Error as e:
+            print(f"Error closing the database connection: {e}")
+        finally:
+            if cursor:
+                cursor.close()
+
+
 
 # def query_with_caching(question):
 #     connection = None
@@ -415,13 +432,21 @@ def cache_response_in_database(question, answer):
 
         connection.commit()
 
-    except Exception as e:
-        print(f"Error caching response in PostgreSQL database: {e}")
+    except psycopg2.OperationalError as e:
+        print(f"Error connecting to the database: {e}")
 
     finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
+        try:
+            if cursor:
+                cursor.close()
+        except psycopg2.Error as e:
+            print(f"Error closing the cursor: {e}")
+
+        try:
+            if connection:
+                connection.close()
+        except psycopg2.Error as e:
+            print(f"Error closing the database connection: {e}")
 
 first_question = 'What is your name?'
 second_question = 'What is your phone number?'
@@ -528,13 +553,8 @@ first_messages = []
 conversation_checked = 0
 question_answered = False
 
-def send_await_message():
-    socketio.emit('start', {'response': 'Ваш запит в обробці. Це може зайняти до 1 хвилини!'}, namespace='/chat')
-    time.sleep(5)
-    socketio.emit('start', {'response': 'Підбираю для Вас найкращу відповідь...'}, namespace='/chat')
-
 def execute_flow(message, user_id, session_id):
-    global thread_openai_id
+    # thread_openai_id = user_thread_mapping.get(user_id)
     global current_session_id
     global question_answered
     global conversation_checked
@@ -574,12 +594,13 @@ def execute_flow(message, user_id, session_id):
                 emit('start', {'user_id': user_id, 'message': cached_response}, room=user_id)
                 send_agent_message_crisp(cached_response, session_id)
                
-
-            elif thread_openai_id is None:
-                thread_openai_id = start_thread_openai()
+            else:
+                print('Going into the condition')
+                thread_openai_id = user_thread_mapping.get(user_id)
 
                     # Assuming you have defined send_message_user somewhere in your code
                 send_message_user(thread_openai_id, first_messages[0])
+                emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
 
                     # Retrieve AI response
                     # Assuming you have defined retrieve_ai_response somewhere in your code
@@ -589,7 +610,7 @@ def execute_flow(message, user_id, session_id):
                     # Cache the response in the MySQL database for future use
                     # Assuming you have defined cache_response_in_database somewhere in your code
                 if ai_response:
-                    send_await_message()
+                    # send_await_message()
                     send_agent_message_crisp(ai_response, session_id)
                     emit('start', {'user_id': user_id, 'message': ai_response}, room=user_id)
                     cache_response_in_database(first_messages[0], ai_response)
@@ -597,7 +618,7 @@ def execute_flow(message, user_id, session_id):
             conversation_checked += 1
         else:
             print("Skipped check_conversation()")
-            send_await_message()
+            # send_await_message()
 
             # Assuming you have defined query_with_caching somewhere in your code
             cached_response = query_with_caching(question)
@@ -609,11 +630,13 @@ def execute_flow(message, user_id, session_id):
                 send_agent_message_crisp(cached_response, session_id)
                
 
-            elif thread_openai_id is None:
-                thread_openai_id = start_thread_openai()
+            else:
+                thread_openai_id = user_thread_mapping.get(user_id)
 
                     # Assuming you have defined send_message_user somewhere in your code
                 send_message_user(thread_openai_id, question)
+                
+                emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
 
                     # Retrieve AI response
                     # Assuming you have defined retrieve_ai_response somewhere in your code
@@ -626,9 +649,7 @@ def execute_flow(message, user_id, session_id):
                     send_agent_message_crisp(ai_response, session_id)
                     cache_response_in_database(question, ai_response)
             
-
-
-            # Check if the current question is a profile-related question
+    # Check if the current question is a profile-related question
     except Exception as e:
         print(f"Error: {str(e)}")
         emit('start', {'user_id': user_id, 'message': 'Щось пішло не так, спробуйте пізніше...'}, room=user_id)

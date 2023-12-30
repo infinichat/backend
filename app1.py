@@ -1,10 +1,9 @@
 import time
+import uuid
 import requests
 import os
 
-token = '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'
-
-thread_openai_id = None
+token = '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'
 
 def start_thread_openai():
     global thread_openai_id
@@ -29,6 +28,15 @@ def start_thread_openai():
     else:
         print("Error starting OpenAI thread:", response.status_code, response.text)
         return None
+    
+# thread_openai_id = None
+user_thread_mapping = {}
+
+user_id = str(uuid.uuid4())  # Generate a unique user ID
+thread_openai_id = start_thread_openai()
+user_thread_mapping[user_id] = thread_openai_id
+print(thread_openai_id)
+
 
 #Sending a message to a thread. Step 1
 def send_message_user(thread_openai_id, question):
@@ -162,11 +170,11 @@ def retrieve_ai_response(thread_openai_id):
         return None
     
 if __name__ == "__main__":
-    thread_openai_id = start_thread_openai()
+    thread_openai_id = user_thread_mapping.get(user_id)
 
-                    # Assuming you have defined send_message_user somewhere in your code
-    send_message_user(thread_openai_id, 'привіт')
+    if thread_openai_id:
+        send_message_user(thread_openai_id, 'привіт')
 
-    ai_response = retrieve_ai_response(thread_openai_id)
+        ai_response = retrieve_ai_response(thread_openai_id)
 
     print(ai_response)
