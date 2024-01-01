@@ -19,16 +19,16 @@ socketio = SocketIO(app, cors_allowed_origins='*')
 load_dotenv()
 
 db_config = {
-    'host': 'ep-square-band-21310990.us-east-2.aws.neon.tech',
-    'database': 'openai_test',
-    'user': 'helloakaa1',
-    'password': 'S4XKzLq5gAPr',
+    'host': os.getenv('PGHOST'),
+    'database': os.getenv('PGDATABASE'),
+    'user': os.getenv('PGUSER'),
+    'password': os.getenv('PGPASSWORD'),
 }
 
 
-website_id = '84ca425b-3cf3-4a00-836c-1212d36eba0c'
-username = '5609c6ae-2281-45fe-b66f-01f3976a8fec'
-password = '3da36469d1da798b3b4ce23eae580637b0a308ea654c71d78cff08937604f191'
+website_id = os.getenv('website_id')
+username = os.getenv('crisp_identifier')
+password = os.getenv('crisp_key')
 
 
 first_messages = []
@@ -289,7 +289,7 @@ def check_run_status(thread_openai_id, run_id):
             print(f"Error checking run status: {response.status_code}, {response.text}")
             break  # Exit the loop if there's an error
 
-assistant_id = 'asst_etblvZdwgK4B5GQruyxyPpVJ'
+assistant_id = os.getenv('assistant_id')
 
 def create_run(thread_openai_id):
     # token = os.getenv("api_key")
@@ -598,9 +598,10 @@ def execute_flow(message, user_id, session_id):
                 print('Going into the condition')
                 thread_openai_id = user_thread_mapping.get(user_id)
 
+                emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
                     # Assuming you have defined send_message_user somewhere in your code
                 send_message_user(thread_openai_id, first_messages[0])
-                emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
+                # emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
 
                     # Retrieve AI response
                     # Assuming you have defined retrieve_ai_response somewhere in your code
@@ -634,9 +635,11 @@ def execute_flow(message, user_id, session_id):
                 thread_openai_id = user_thread_mapping.get(user_id)
 
                     # Assuming you have defined send_message_user somewhere in your code
+                emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
+
                 send_message_user(thread_openai_id, question)
                 
-                emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
+                # emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
 
                     # Retrieve AI response
                     # Assuming you have defined retrieve_ai_response somewhere in your code
