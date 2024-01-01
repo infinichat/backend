@@ -353,20 +353,22 @@ def retrieve_ai_response(thread_openai_id):
     except requests.exceptions.RequestException as e:
         print(f"API Request Error: {e}")
         return None
-    
+
 def query_with_caching(question):
     connection = None
     try:
         connection = psycopg2.connect(**db_config)
         cursor = connection.cursor()
 
-        # Remove punctuation and perform case-insensitive matching using regular expression
-        cleaned_question = re.sub(r'[^\w\s]', '', question)
-        query = "SELECT answer FROM chat_cache WHERE question ~* %s"
+        # Convert question to lowercase and remove accents
+        cleaned_question = re.sub(r'[^\w\s]', '', question).lower()
+        
+        # Use a simplified query without regular expressions
+        query = "SELECT answer FROM chat_cache WHERE unaccent(LOWER(question)) = unaccent(%s)"
         cursor.execute(query, (cleaned_question,))
         result = cursor.fetchone()
 
-        print("querying db")
+        print("Querying db")
 
         if result:
             return result[0]
@@ -382,12 +384,7 @@ def query_with_caching(question):
                 connection.close()
         except psycopg2.Error as e:
             print(f"Error closing the database connection: {e}")
-        finally:
-            if cursor:
-                cursor.close()
-
-
-
+ 
 # def query_with_caching(question):
 #     connection = None
 #     try:
@@ -396,10 +393,8 @@ def query_with_caching(question):
 
 #         # Remove punctuation and perform case-insensitive matching using regular expression
 #         cleaned_question = re.sub(r'[^\w\s]', '', question)
-
-#         # Update the regex pattern to include Ukrainian letters and use the re.UNICODE flag
 #         query = "SELECT answer FROM chat_cache WHERE question ~* %s"
-#         cursor.execute(query, (cleaned_question,), flags=re.UNICODE)
+#         cursor.execute(query, (cleaned_question,))
 #         result = cursor.fetchone()
 
 #         print("querying db")
@@ -409,44 +404,48 @@ def query_with_caching(question):
 #         else:
 #             return None
 
-#     except psycopg2.Error as e:
-#         print(f"Error querying PostgreSQL database: {e}")
-#         return None
+#     except psycopg2.OperationalError as e:
+#         print(f"Error connecting to the database: {e}")
 
 #     finally:
-#         if connection and connection.closed == 0:
-#             cursor.close()
-#             connection.close()
+#         try:
+#             if connection:
+#                 connection.close()
+#         except psycopg2.Error as e:
+#             print(f"Error closing the database connection: {e}")
+#         finally:
+#             if cursor:
+#                 cursor.close()
 
 
-def cache_response_in_database(question, answer):
-    connection = None
-    try:
-        connection = psycopg2.connect(**db_config)
-        cursor = connection.cursor()
+# def cache_response_in_database(question, answer):
+#     connection = None
+#     try:
+#         connection = psycopg2.connect(**db_config)
+#         cursor = connection.cursor()
 
-        query = "INSERT INTO chat_cache (question, answer) VALUES (%s, %s)"
-        cursor.execute(query, (question, answer))
+#         query = "INSERT INTO chat_cache (question, answer) VALUES (%s, %s)"
+#         cursor.execute(query, (question, answer))
 
-        print("inserting qa")
+#         print("inserting qa")
 
-        connection.commit()
+#         connection.commit()
 
-    except psycopg2.OperationalError as e:
-        print(f"Error connecting to the database: {e}")
+#     except psycopg2.OperationalError as e:
+#         print(f"Error connecting to the database: {e}")
 
-    finally:
-        try:
-            if cursor:
-                cursor.close()
-        except psycopg2.Error as e:
-            print(f"Error closing the cursor: {e}")
+#     finally:
+#         try:
+#             if cursor:
+#                 cursor.close()
+#         except psycopg2.Error as e:
+#             print(f"Error closing the cursor: {e}")
 
-        try:
-            if connection:
-                connection.close()
-        except psycopg2.Error as e:
-            print(f"Error closing the database connection: {e}")
+#         try:
+#             if connection:
+#                 connection.close()
+#         except psycopg2.Error as e:
+#             print(f"Error closing the database connection: {e}")
 
 first_question = 'What is your name?'
 second_question = 'What is your phone number?'
@@ -570,7 +569,7 @@ def execute_flow(message, user_id, session_id):
         if not question_answered and conversation_checked == 0:
             print('Appending the first question')
             first_messages.append(question)
-            cached_response = query_with_caching(first_messages[0])
+            # cached_response = query_with_caching(first_messages[0])
             print("Executing check_conversation() for the first time")
             send_agent_message_crisp('Як до вас звертатись?', session_id)
             # send_await_message('Як до вас звертатись?')
@@ -614,7 +613,7 @@ def execute_flow(message, user_id, session_id):
                     # send_await_message()
                     send_agent_message_crisp(ai_response, session_id)
                     emit('start', {'user_id': user_id, 'message': ai_response}, room=user_id)
-                    cache_response_in_database(first_messages[0], ai_response)
+                    # cache_response_in_database(first_messages[0], ai_response)
 
             conversation_checked += 1
         else:
@@ -650,7 +649,7 @@ def execute_flow(message, user_id, session_id):
                 if ai_response:
                     emit('start', {'user_id': user_id, 'message': ai_response}, room=user_id)
                     send_agent_message_crisp(ai_response, session_id)
-                    cache_response_in_database(question, ai_response)
+                    # cache_response_in_database(question, ai_response)
             
     # Check if the current question is a profile-related question
     except Exception as e:
