@@ -36,7 +36,7 @@ user_session_mapping = {}
 user_thread_mapping = {}
 
 
-def start_thread_openai():
+def start_thread_openai(user_id):
     global thread_openai_id
     api_url = "https://api.openai.com/v1/threads"
     response = requests.post(
@@ -54,12 +54,20 @@ def start_thread_openai():
         data = response.json()
         thread_openai_id = data.get("id")
         print("Thread started successfully! Thread id:", thread_openai_id)
-
         return thread_openai_id
-    else:
-        print("Error starting OpenAI thread:", response.status_code, response.text)
+
+    elif response.status_code == 401:  # Unauthorized (Invalid API key)
+        error_message = response.json().get("error", {}).get("message", "")
+        if "Incorrect API key provided" in error_message:
+            print("Error starting OpenAI thread: Incorrect API key provided")
+            emit('start', {'user_id': user_id, 'message': "Технічні неполадки. Відповімо скоро"})
+        else:
+            print("Error starting OpenAI thread:", response.status_code, error_message)
         return None
-    
+    # Handle other error cases if needed...
+
+# ... (rest of the code)
+
 @socketio.on('connect')
 def handle_connect():
     global question_answered
@@ -74,7 +82,7 @@ def handle_connect():
     session_id = start_conversation_crisp()
     user_session_mapping[user_id] = session_id
     print(session_id)
-    thread_openai_id = start_thread_openai()
+    thread_openai_id = start_thread_openai(user_id)
     user_thread_mapping[user_id] = thread_openai_id
     print(thread_openai_id)
 
@@ -82,6 +90,7 @@ def handle_connect():
     question_answered = False
     conversation_checked = 0
     first_messages = []
+
 
 @socketio.on('disconnect')
 def handle_disconnect():
