@@ -215,9 +215,9 @@ def send_agent_message_crisp(response, session_id):
         print(response.text)
 
 
-@app.route('/')
-def index():
-    return render_template("index.html")
+# @app.route('/')
+# def index():
+#     return render_template("index.html")
 
 # ?
     
