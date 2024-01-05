@@ -665,4 +665,5 @@ def execute_flow(message, user_id, session_id):
         print(f"Error: {str(e)}")
         emit('start', {'user_id': user_id, 'message': 'Щось пішло не так, спробуйте пізніше...'}, room=user_id)
 
-socketio.run(app)
+if __name__ == "__main__":
+    socketio.run(app)
