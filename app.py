@@ -556,10 +556,10 @@ def check_conversation(session_id):
     except requests.exceptions.RequestException as err:
         print(f"Request Error: {err}")
 
-first_messages = [] 
+# first_messages = [] 
 
-conversation_checked = 0
-question_answered = False
+# conversation_checked = 0
+# question_answered = False
 
 def execute_flow(message, user_id, session_id):
     # thread_openai_id = user_thread_mapping.get(user_id)
