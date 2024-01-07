@@ -67,12 +67,14 @@ def start_thread_openai(user_id):
     # Handle other error cases if needed...
 
 # ... (rest of the code)
+user_conversation_state = {}
+user_first_messages = {}
 
 @socketio.on('connect')
 def handle_connect():
     global question_answered
-    global conversation_checked
-    global first_messages
+    # global conversation_checked
+    # global first_messages
 
     user_id = str(uuid.uuid4())  # Generate a unique user ID
     join_room(user_id)
@@ -88,8 +90,10 @@ def handle_connect():
 
     # Reset state for the new user
     question_answered = False
-    conversation_checked = 0
-    first_messages = []
+    user_conversation_state[user_id] = 0
+    user_first_messages[user_id] = []
+    # conversation_checked = 0
+    # first_messages = []
 
 
 @socketio.on('disconnect')
@@ -562,106 +566,118 @@ def check_conversation(session_id):
 # question_answered = False
 
 def execute_flow(message, user_id, session_id):
-    # thread_openai_id = user_thread_mapping.get(user_id)
     global current_session_id
     global question_answered
     global conversation_checked
-    global first_messages
 
     question = message
+   
+    user_first_msgs = user_first_messages.get(user_id, [])
 
     if not question:
         raise ValueError("Invalid payload: 'question' is required.")
 
     send_user_message_crisp(question, session_id)
-    try: 
-        if not question_answered and conversation_checked == 0:
+
+    try:
+        if not question_answered and user_conversation_state.get(user_id, 0) == 0:
             print('Appending the first question')
-            first_messages.append(question)
-            # cached_response = query_with_caching(first_messages[0])
+            user_first_msgs.append(question)
             print("Executing check_conversation() for the first time")
             send_agent_message_crisp('Як до вас звертатись?', session_id)
-            # send_await_message('Як до вас звертатись?')
             emit('start', {'user_id': user_id, 'message': 'Як до вас звертатись?'}, room=user_id)
-            # check_conversation()
-            conversation_checked += 1
-        elif not question_answered and conversation_checked == 1:
-            print("Executing check_conversation() for the second time")
+            user_conversation_state[user_id] = 1
 
+        elif not question_answered and user_conversation_state.get(user_id, 0) == 1:
+            print("Executing check_conversation() for the second time")
             emit('start', {'user_id': user_id, 'message': "Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами."}, room=user_id)
             send_agent_message_crisp("Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами.", session_id)
-            # check_conversation()
-            conversation_checked += 1
+            user_conversation_state[user_id] = 2
 
-        elif not question_answered and conversation_checked == 2:
-            cached_response = query_with_caching(first_messages[0])
-            check_conversation(session_id)
-            if cached_response:
-                    # If the question is in the database, return the cached response
-                    # Assuming you have defined send_agent_message_crisp somewhere in your code
-                emit('start', {'user_id': user_id, 'message': cached_response}, room=user_id)
-                send_agent_message_crisp(cached_response, session_id)
-               
-            else:
-                print('Going into the condition')
-                thread_openai_id = user_thread_mapping.get(user_id)
-
-                emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
-                    # Assuming you have defined send_message_user somewhere in your code
-                send_message_user(thread_openai_id, first_messages[0])
-                # emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
-
-                    # Retrieve AI response
-                    # Assuming you have defined retrieve_ai_response somewhere in your code
-
-                ai_response = retrieve_ai_response(thread_openai_id)
-
-                    # Cache the response in the MySQL database for future use
-                    # Assuming you have defined cache_response_in_database somewhere in your code
-                if ai_response:
-                    # send_await_message()
-                    send_agent_message_crisp(ai_response, session_id)
-                    emit('start', {'user_id': user_id, 'message': ai_response}, room=user_id)
-                    # cache_response_in_database(first_messages[0], ai_response)
-
-            conversation_checked += 1
         else:
             print("Skipped check_conversation()")
-            # send_await_message()
-
-            # Assuming you have defined query_with_caching somewhere in your code
             cached_response = query_with_caching(question)
 
             if cached_response:
-                    # If the question is in the database, return the cached response
-                    # Assuming you have defined send_agent_message_crisp somewhere in your code
                 emit('start', {'user_id': user_id, 'message': cached_response}, room=user_id)
                 send_agent_message_crisp(cached_response, session_id)
-               
-
             else:
                 thread_openai_id = user_thread_mapping.get(user_id)
-
-                    # Assuming you have defined send_message_user somewhere in your code
                 emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
-
                 send_message_user(thread_openai_id, question)
-                
-                # emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
-
-                    # Retrieve AI response
-                    # Assuming you have defined retrieve_ai_response somewhere in your code
                 ai_response = retrieve_ai_response(thread_openai_id)
-
-                    # Cache the response in the MySQL database for future use
-                    # Assuming you have defined cache_response_in_database somewhere in your code
                 if ai_response:
                     emit('start', {'user_id': user_id, 'message': ai_response}, room=user_id)
                     send_agent_message_crisp(ai_response, session_id)
-                    # cache_response_in_database(question, ai_response)
-            
-    # Check if the current question is a profile-related question
+
     except Exception as e:
         print(f"Error: {str(e)}")
         emit('start', {'user_id': user_id, 'message': 'Щось пішло не так, спробуйте пізніше...'}, room=user_id)
 
+# def execute_flow(message, user_id, session_id):
+#     global current_session_id
+#     global question_answered
+#     global conversation_checked
+
+#     question = message
+   
+#     user_first_msgs = user_first_messages.get(user_id, [])
+
+#     if not question:
+#         raise ValueError("Invalid payload: 'question' is required.")
+
+#     send_user_message_crisp(question, session_id)
+
+#     try:
+#         if not question_answered and user_conversation_state.get(user_id, 0):
+#             print('Appending the first question')
+#             user_first_msgs.append(question)
+#             print("Executing check_conversation() for the first time")
+#             send_agent_message_crisp('Як до вас звертатись?', session_id)
+#             emit('start', {'user_id': user_id, 'message': 'Як до вас звертатись?'}, room=user_id)
+#             user_conversation_state.get(user_id, 1)
+
+#         elif not question_answered and user_conversation_state.get(user_id, 1):
+#             print("Executing check_conversation() for the second time")
+#             emit('start', {'user_id': user_id, 'message': "Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами."}, room=user_id)
+#             send_agent_message_crisp("Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами.", session_id)
+#             user_conversation_state.get(user_id, 2)
+
+#         else:
+#             print("Skipped check_conversation()")
+#             cached_response = query_with_caching(question)
+
+#             if cached_response:
+#                 emit('start', {'user_id': user_id, 'message': cached_response}, room=user_id)
+#                 send_agent_message_crisp(cached_response, session_id)
+#             else:
+#                 thread_openai_id = user_thread_mapping.get(user_id)
+#                 emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
+#                 send_message_user(thread_openai_id, question)
+#                 ai_response = retrieve_ai_response(thread_openai_id)
+#                 if ai_response:
+#                     emit('start', {'user_id': user_id, 'message': ai_response}, room=user_id)
+#                     send_agent_message_crisp(ai_response, session_id)
+
+#     except Exception as e:
+#         print(f"Error: {str(e)}")
+#         emit('start', {'user_id': user_id, 'message': 'Щось пішло не так, спробуйте пізніше...'}, room=user_id)
+
+
+       # elif not question_answered  == 2:
+        #     cached_response = query_with_caching(user_first_msgs[0])
+        #     check_conversation(session_id)
+        #     if cached_response:
+        #         emit('start', {'user_id': user_id, 'message': cached_response}, room=user_id)
+        #         send_agent_message_crisp(cached_response, session_id)
+        #     else:
+        #         print('Going into the condition')
+        #         thread_openai_id = user_thread_mapping.get(user_id)
+        #         emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
+        #         send_message_user(thread_openai_id, user_first_msgs[0])
+        #         ai_response = retrieve_ai_response(thread_openai_id)
+        #         if ai_response:
+        #             send_agent_message_crisp(ai_response, session_id)
+        #             emit('start', {'user_id': user_id, 'message': ai_response}, room=user_id)
+
+        #     user_state += 1
