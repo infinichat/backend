@@ -593,6 +593,25 @@ def execute_flow(message, user_id, session_id):
             emit('start', {'user_id': user_id, 'message': "Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами."}, room=user_id)
             send_agent_message_crisp("Вкажіть будь ласка свій номер телефону для подальшого зв'язку з Вами.", session_id)
             user_conversation_state[user_id] = 2
+        
+        elif not question_answered and user_conversation_state.get(user_id, 0) == 2:
+            cached_response = query_with_caching(user_first_msgs[0])
+            print(cached_response)
+            check_conversation(session_id)
+            if cached_response:
+                emit('start', {'user_id': user_id, 'message': cached_response}, room=user_id)
+                send_agent_message_crisp(cached_response, session_id)
+            else:
+                print('Going into the condition')
+                thread_openai_id = user_thread_mapping.get(user_id)
+                emit('start', {'user_id': user_id, 'message': 'Ваш запит в обробці. Це може зайняти до 1 хвилини'}, room=user_id)
+                send_message_user(thread_openai_id, user_first_msgs[0])
+                ai_response = retrieve_ai_response(thread_openai_id)
+                if ai_response:
+                    send_agent_message_crisp(ai_response, session_id)
+                    emit('start', {'user_id': user_id, 'message': ai_response}, room=user_id)
+
+            user_conversation_state[user_id] = 3
 
         else:
             print("Skipped check_conversation()")
